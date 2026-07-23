@@ -766,10 +766,19 @@ async function extractDocxImages(buf){
 
 /** Extrae, de forma best-effort, las imagenes rasterizadas incrustadas en un PDF
  *  usando pdf.js (recorre la lista de operadores de cada pagina buscando XObjects de imagen). */
+const IMAGE_PAINT_OPS_NAMES = ['paintImageXObject','paintInlineImageXObject','paintImageXObjectRepeat','paintImageMaskXObject'];
+
 async function extractPdfImages(buf){
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
   const doc = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise;
   const images = [];
+  // Construye el set de codigos de operador que pintan algun tipo de imagen,
+  // segun los nombres que existan en esta version concreta de pdf.js.
+  const imageOpCodes = new Set(
+    IMAGE_PAINT_OPS_NAMES.map(function(name){ return pdfjsLib.OPS[name]; }).filter(function(v){ return v != null; })
+  );
+  console.info('[FDV] extractPdfImages: paginas=' + doc.numPages + ', operadores de imagen reconocidos=', IMAGE_PAINT_OPS_NAMES.filter(function(n){ return pdfjsLib.OPS[n] != null; }));
+
   for (let i = 1; i <= doc.numPages; i++){
     const page = await doc.getPage(i);
     const ops = await page.getOperatorList();
@@ -785,8 +794,10 @@ async function extractPdfImages(buf){
     } catch(renderErr){
       console.warn('No se pudo renderizar la pagina ' + i + ' para decodificar imagenes:', renderErr);
     }
+    let candidatesInPage = 0;
     for (let j = 0; j < ops.fnArray.length; j++){
-      if (ops.fnArray[j] !== pdfjsLib.OPS.paintImageXObject) continue;
+      if (!imageOpCodes.has(ops.fnArray[j])) continue;
+      candidatesInPage++;
       const imgName = ops.argsArray[j][0];
       try{
         // Nunca esperar indefinidamente: si la imagen no esta lista en 3s, se omite.
@@ -797,35 +808,58 @@ async function extractPdfImages(buf){
           } catch(getErr){ resolve(null); return; }
           setTimeout(function(){ if (!settled) resolve(null); }, 3000);
         });
-        if (!imgObj || !imgObj.data || !imgObj.width || !imgObj.height) continue;
+        if (!imgObj){
+          console.warn('[FDV] Pagina ' + i + ', imagen "' + imgName + '": no se pudo obtener el objeto (probablemente aun no decodificado).');
+          continue;
+        }
+        if (!imgObj.width || !imgObj.height){
+          console.warn('[FDV] Pagina ' + i + ', imagen "' + imgName + '": sin ancho/alto valido.', imgObj);
+          continue;
+        }
+        const px = imgObj.width * imgObj.height;
+        // Distintas versiones/formatos exponen los pixeles en .data (array plano) o
+        // en .bitmap (ya como ImageBitmap/ImageData lista para dibujar).
+        let putOk = false;
         const canvas = document.createElement('canvas');
         canvas.width = imgObj.width;
         canvas.height = imgObj.height;
         const ctx = canvas.getContext('2d');
-        const imgData = ctx.createImageData(imgObj.width, imgObj.height);
-        const src = imgObj.data;
-        const dst = imgData.data;
-        const px = imgObj.width * imgObj.height;
-        if (src.length === px * 4){
-          dst.set(src);
-        } else if (src.length === px * 3){
-          for (let p = 0; p < px; p++){
-            dst[p*4] = src[p*3]; dst[p*4+1] = src[p*3+1]; dst[p*4+2] = src[p*3+2]; dst[p*4+3] = 255;
+        if (imgObj.bitmap){
+          try{ ctx.drawImage(imgObj.bitmap, 0, 0); putOk = true; } catch(bmErr){ console.warn('[FDV] Error dibujando bitmap:', bmErr); }
+        } else if (imgObj.data){
+          const imgData = ctx.createImageData(imgObj.width, imgObj.height);
+          const src = imgObj.data;
+          const dst = imgData.data;
+          if (src.length === px * 4){
+            dst.set(src); putOk = true;
+          } else if (src.length === px * 3){
+            for (let p = 0; p < px; p++){
+              dst[p*4] = src[p*3]; dst[p*4+1] = src[p*3+1]; dst[p*4+2] = src[p*3+2]; dst[p*4+3] = 255;
+            }
+            putOk = true;
+          } else if (src.length === px){
+            for (let p = 0; p < px; p++){
+              dst[p*4] = src[p]; dst[p*4+1] = src[p]; dst[p*4+2] = src[p]; dst[p*4+3] = 255;
+            }
+            putOk = true;
+          } else {
+            console.warn('[FDV] Pagina ' + i + ', imagen "' + imgName + '": formato de datos no reconocido (data.length=' + src.length + ', px=' + px + ').');
           }
-        } else if (src.length === px){
-          for (let p = 0; p < px; p++){
-            dst[p*4] = src[p]; dst[p*4+1] = src[p]; dst[p*4+2] = src[p]; dst[p*4+3] = 255;
-          }
+          if (putOk) ctx.putImageData(imgData, 0, 0);
         } else {
-          continue; // formato no soportado (ej. imagenes JPEG/CMYK embebidas), se omite
+          console.warn('[FDV] Pagina ' + i + ', imagen "' + imgName + '": objeto sin .data ni .bitmap.', imgObj);
         }
-        ctx.putImageData(imgData, 0, 0);
-        images.push(canvas.toDataURL('image/png'));
+        if (putOk){
+          images.push(canvas.toDataURL('image/png'));
+          console.info('[FDV] Pagina ' + i + ': imagen "' + imgName + '" extraida OK (' + imgObj.width + 'x' + imgObj.height + ').');
+        }
       } catch(e){
         console.warn('No se pudo decodificar una imagen del PDF:', e);
       }
     }
+    console.info('[FDV] Pagina ' + i + ': ' + candidatesInPage + ' operador(es) de imagen encontrados.');
   }
+  console.info('[FDV] extractPdfImages: total de imagenes extraidas =', images.length);
   return images;
 }
 
