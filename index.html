@@ -617,6 +617,8 @@ const els = {
 
 let logoDataUrl = null;
 let manualData = null;
+let extractedImages = [];
+let figImageQueueIndex = 0;
 
 /* ---------------- Provider switching ---------------- */
 function applyProviderUI(providerKey, opts){
@@ -698,31 +700,35 @@ els.fileInput.addEventListener('change', (e) => {
 
 async function handleFile(file){
   setStatus('Extrayendo texto de "' + file.name + '"…', true);
+  extractedImages = [];
   try{
     const name = file.name.toLowerCase();
     let text = '';
     if (name.endsWith('.docx')){
       const buf = await file.arrayBuffer();
-      const result = await mammoth.extractRawText({ arrayBuffer: buf });
+      const result = await mammoth.extractRawText({ arrayBuffer: buf.slice(0) });
       text = result.value;
+      try{ extractedImages = await extractDocxImages(buf); } catch(imgErr){ console.warn('No se pudieron extraer imagenes del docx:', imgErr); }
     } else if (name.endsWith('.pdf')){
-      text = await extractPdfText(file);
+      const buf = await file.arrayBuffer();
+      text = await extractPdfText(buf.slice(0));
+      try{ extractedImages = await extractPdfImages(buf); } catch(imgErr){ console.warn('No se pudieron extraer imagenes del pdf:', imgErr); }
     } else {
       text = await file.text();
     }
     els.extracted.value = text.trim();
     els.btnTranslate.disabled = !(els.extracted.value.trim().length > 0);
-    setStatus('Texto extraído (' + text.length + ' caracteres). Revísalo antes de traducir.', false);
+    const imgNote = extractedImages.length ? (' · ' + extractedImages.length + ' imagen(es) original(es) detectada(s), se mantendran automaticamente en el borrador.') : '';
+    setStatus('Texto extraído (' + text.length + ' caracteres).' + imgNote + ' Revísalo antes de traducir.', false);
   } catch(err){
     console.error(err);
     setStatus('Error al leer el archivo: ' + err.message, false);
   }
 }
 
-async function extractPdfText(file){
-  const buf = await file.arrayBuffer();
+async function extractPdfText(buf){
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+  const doc = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise;
   let out = [];
   for (let i = 1; i <= doc.numPages; i++){
     const page = await doc.getPage(i);
@@ -731,6 +737,68 @@ async function extractPdfText(file){
     out.push(strings.join(' '));
   }
   return out.join('\n\n');
+}
+
+/** Extrae las imagenes incrustadas de un .docx (en el orden en que aparecen)
+ *  usando el propio manejo de imagenes de mammoth (las entrega como data URI). */
+async function extractDocxImages(buf){
+  const images = [];
+  const options = {
+    convertImage: mammoth.images.imgElement(function(image){
+      return image.read('base64').then(function(base64){
+        images.push('data:' + image.contentType + ';base64,' + base64);
+        return {};
+      });
+    })
+  };
+  await mammoth.convertToHtml({ arrayBuffer: buf.slice(0) }, options);
+  return images;
+}
+
+/** Extrae, de forma best-effort, las imagenes rasterizadas incrustadas en un PDF
+ *  usando pdf.js (recorre la lista de operadores de cada pagina buscando XObjects de imagen). */
+async function extractPdfImages(buf){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  const doc = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise;
+  const images = [];
+  for (let i = 1; i <= doc.numPages; i++){
+    const page = await doc.getPage(i);
+    const ops = await page.getOperatorList();
+    for (let j = 0; j < ops.fnArray.length; j++){
+      if (ops.fnArray[j] !== pdfjsLib.OPS.paintImageXObject) continue;
+      const imgName = ops.argsArray[j][0];
+      try{
+        const imgObj = await new Promise(function(resolve){ page.objs.get(imgName, resolve); });
+        if (!imgObj || !imgObj.data || !imgObj.width || !imgObj.height) continue;
+        const canvas = document.createElement('canvas');
+        canvas.width = imgObj.width;
+        canvas.height = imgObj.height;
+        const ctx = canvas.getContext('2d');
+        const imgData = ctx.createImageData(imgObj.width, imgObj.height);
+        const src = imgObj.data;
+        const dst = imgData.data;
+        const px = imgObj.width * imgObj.height;
+        if (src.length === px * 4){
+          dst.set(src);
+        } else if (src.length === px * 3){
+          for (let p = 0; p < px; p++){
+            dst[p*4] = src[p*3]; dst[p*4+1] = src[p*3+1]; dst[p*4+2] = src[p*3+2]; dst[p*4+3] = 255;
+          }
+        } else if (src.length === px){
+          for (let p = 0; p < px; p++){
+            dst[p*4] = src[p]; dst[p*4+1] = src[p]; dst[p*4+2] = src[p]; dst[p*4+3] = 255;
+          }
+        } else {
+          continue; // formato no soportado (ej. imagenes JPEG/CMYK embebidas), se omite
+        }
+        ctx.putImageData(imgData, 0, 0);
+        images.push(canvas.toDataURL('image/png'));
+      } catch(e){
+        console.warn('No se pudo decodificar una imagen del PDF:', e);
+      }
+    }
+  }
+  return images;
 }
 
 els.extracted.addEventListener('input', () => {
@@ -986,6 +1054,7 @@ let figCounter = 0;
 
 function renderDraft(data){
   els.draftWrap.style.display = 'block';
+  figImageQueueIndex = 0;
   const html = [];
 
   // Cover
@@ -1078,10 +1147,19 @@ function renderTable(b){
 function renderFigure(b){
   figCounter++;
   const fid = 'fig-' + figCounter;
+  // Si el manual original traia imagenes incrustadas, se van asignando en orden
+  // automaticamente a cada figura — el usuario ya no tiene que subirlas a mano
+  // (solo puede reemplazarlas si alguna quedo mal ubicada).
+  const auto = extractedImages[figImageQueueIndex];
+  if (auto) figImageQueueIndex++;
+  const imgTag = auto
+    ? '<img src="' + auto + '" style="display:block;">'
+    : '<img style="display:none;">';
+  const labelText = auto ? '📎 Cambiar imagen / diagrama' : '📎 Adjuntar imagen / diagrama';
   return '<div class="fdv-figure" data-figid="' + fid + '">' +
     '<div class="fdv-figure-frame">' +
-      '<img style="display:none;">' +
-      '<label class="fig-upload-label">📎 Adjuntar imagen / diagrama<input type="file" accept="image/*" data-figinput="' + fid + '" style="display:none;"></label>' +
+      imgTag +
+      '<label class="fig-upload-label">' + labelText + '<input type="file" accept="image/*" data-figinput="' + fid + '" style="display:none;"></label>' +
     '</div>' +
     '<div class="fdv-figure-caption" contenteditable="true">' + esc(b.caption || 'Figura') + '</div>' +
   '</div>';
