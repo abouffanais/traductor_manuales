@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="es-CL">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FDV · Traductor y maquetador de manuales</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,400;0,500;0,600;0,700;1,600;1,700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.7.0/mammoth.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<style>
+  :root{
+    --ink:#111111;
+    --paper:#ffffff;
+    --rule:#111111;
+    --muted:#6b6b6b;
+    --soft:#f3f3f3;
+    --accent:#111111;
+    --danger:#b3261e;
+    --font: 'Poppins', 'Century Gothic', 'Futura', Arial, sans-serif;
+    --radius: 10px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:var(--font);
+    color:var(--ink);
+    background:#e9e9ea;
+  }
+  a{color:inherit;}
+
+  /* ---------- App chrome (control panel) ---------- */
+  #app{
+    max-width:980px;
+    margin:0 auto;
+    padding:28px 24px 80px;
+  }
+  .app-header{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    margin-bottom:18px;
+  }
+  .app-header h1{
+    font-size:20px;
+    font-weight:700;
+    margin:0;
+    letter-spacing:.02em;
+  }
+  .app-header .tag{
+    font-size:12px;
+    color:var(--muted);
+  }
+  .card{
+    background:var(--paper);
+    border-radius:var(--radius);
+    padding:20px 22px;
+    margin-bottom:16px;
+    box-shadow:0 1px 2px rgba(0,0,0,.06), 0 1px 12px rgba(0,0,0,.04);
+  }
+  .card h2{
+    font-size:14px;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    margin:0 0 14px;
+    color:var(--ink);
+    border-bottom:2px solid var(--ink);
+    display:inline-block;
+    padding-bottom:4px;
+  }
+  .grid2{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:12px;
+  }
+  .grid3{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:12px;
+  }
+  label{
+    display:block;
+    font-size:12px;
+    font-weight:600;
+    margin-bottom:4px;
+    color:#333;
+  }
+  input[type=text], input[type=password], select, textarea{
+    width:100%;
+    font-family:var(--font);
+    font-size:13.5px;
+    padding:9px 10px;
+    border:1px solid #ccc;
+    border-radius:6px;
+    background:#fff;
+    color:var(--ink);
+  }
+  textarea{resize:vertical;}
+  .field{margin-bottom:12px;}
+  .help{
+    font-size:12px;
+    color:var(--muted);
+    margin-top:4px;
+    line-height:1.4;
+  }
+  .row{
+    display:flex;
+    gap:10px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  button{
+    font-family:var(--font);
+    font-weight:600;
+    font-size:13.5px;
+    padding:10px 16px;
+    border-radius:6px;
+    border:1px solid var(--ink);
+    background:var(--ink);
+    color:#fff;
+    cursor:pointer;
+  }
+  button.secondary{
+    background:#fff;
+    color:var(--ink);
+  }
+  button:disabled{
+    opacity:.45;
+    cursor:not-allowed;
+  }
+  button:hover:not(:disabled){filter:brightness(1.15);}
+  button.secondary:hover:not(:disabled){background:#f2f2f2;}
+  .status{
+    font-size:12.5px;
+    color:var(--muted);
+    min-height:16px;
+  }
+  .status.busy::before{
+    content:"⏳ ";
+  }
+  details summary{
+    cursor:pointer;
+    font-weight:600;
+    font-size:13px;
+    margin-bottom:8px;
+  }
+  .guide{
+    font-size:13px;
+    line-height:1.55;
+    color:#333;
+  }
+  .guide ol{padding-left:20px;margin:8px 0 0;}
+  .guide li{margin-bottom:4px;}
+  .pill{
+    display:inline-block;
+    font-size:10.5px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.05em;
+    background:var(--soft);
+    padding:2px 8px;
+    border-radius:20px;
+    margin-left:6px;
+  }
+  .dropzone{
+    border:2px dashed #bbb;
+    border-radius:8px;
+    padding:22px;
+    text-align:center;
+    color:var(--muted);
+    font-size:13px;
+    cursor:pointer;
+    background:#fafafa;
+  }
+  .dropzone.drag{
+    border-color:var(--ink);
+    background:#f0f0f0;
+  }
+
+  /* ---------- Draft (editable manual) ---------- */
+  #draftWrap{display:none;}
+  #draftToolbar{
+    position:sticky;
+    top:0;
+    z-index:5;
+    background:#1c1c1c;
+    color:#fff;
+    padding:10px 16px;
+    border-radius:var(--radius) var(--radius) 0 0;
+    display:flex;
+    gap:10px;
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  #draftToolbar .t{font-size:12.5px;color:#ccc;margin-right:auto;}
+  #draft{
+    background:#fff;
+    padding:36px 40px;
+    border-radius:0 0 var(--radius) var(--radius);
+  }
+  #draft [contenteditable=true]{outline:none;}
+  #draft [contenteditable=true]:hover{background:rgba(255,220,0,.08);}
+  #draft [contenteditable=true]:focus{background:rgba(255,220,0,.16);}
+
+  .fdv-cover{
+    position:relative;
+    border:2px solid var(--ink);
+    margin-bottom:26px;
+    min-height:640px;
+    padding:0;
+    overflow:hidden;
+  }
+  .fdv-cover-sidebar{
+    position:absolute;
+    left:0; top:0; bottom:0;
+    width:38px;
+    background:var(--ink);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:flex-end;
+    padding-bottom:26px;
+  }
+  .fdv-cover-sidebar-text{
+    color:#fff;
+    font-size:10.5px;
+    font-weight:700;
+    letter-spacing:.08em;
+    writing-mode:vertical-rl;
+    transform:rotate(180deg);
+    text-align:center;
+    line-height:1.4;
+  }
+  .fdv-cover-main{
+    margin-left:38px;
+    padding:44px 40px 32px;
+    display:flex;
+    flex-direction:column;
+    min-height:640px;
+    box-sizing:border-box;
+  }
+  .fdv-cat{
+    font-style:italic;
+    font-weight:700;
+    font-size:26px;
+    display:block;
+  }
+  .fdv-name{
+    font-weight:400;
+    font-size:24px;
+    display:block;
+    margin-top:2px;
+  }
+  .fdv-rule{
+    border:none;
+    border-top:2px solid var(--ink);
+    width:100%;
+    max-width:420px;
+    margin:14px 0 10px;
+  }
+  .fdv-sku{
+    font-size:12.5px;
+    letter-spacing:.04em;
+  }
+  .fdv-cover-illustration{
+    margin-top:40px;
+    flex:1;
+    display:flex;
+    flex-direction:column;
+  }
+  .fdv-cover-illustration .fdv-figure-frame{
+    flex:1;
+    min-height:280px;
+    border:1px solid var(--ink);
+    border-radius:0;
+    background:#fff;
+  }
+  .fdv-cover-logo{
+    align-self:flex-end;
+    margin-top:16px;
+  }
+  .fdv-logoslot img{max-height:46px;}
+  .logo-upload{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    font-size:12px;
+    color:var(--muted);
+    border:1px dashed #bbb;
+    padding:6px 10px;
+    border-radius:6px;
+    cursor:pointer;
+  }
+
+  .fdv-label{
+    display:inline-block;
+    font-weight:700;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    font-size:13px;
+    border-bottom:2px solid var(--ink);
+    padding-bottom:4px;
+    margin-bottom:16px;
+  }
+  .fdv-toc-block{margin-bottom:34px;}
+  .fdv-toc-row{
+    display:flex;
+    justify-content:space-between;
+    font-weight:600;
+    font-size:14px;
+    padding:8px 0;
+    border-bottom:1px dotted #ccc;
+  }
+
+  .fdv-section{margin-bottom:40px;}
+  .fdv-section h2.fdv-label{display:block;text-align:center;}
+  .fdv-section h3{
+    font-size:14.5px;
+    font-weight:700;
+    margin:20px 0 8px;
+  }
+  .fdv-section h4{
+    font-size:13.5px;
+    font-weight:700;
+    margin:14px 0 6px;
+  }
+  .fdv-section p{
+    font-size:13.5px;
+    line-height:1.6;
+    margin:0 0 12px;
+  }
+  .fdv-section ul{
+    font-size:13.5px;
+    line-height:1.6;
+    margin:0 0 12px;
+    padding-left:20px;
+  }
+  .fdv-note, .fdv-warning{
+    font-size:13px;
+    line-height:1.55;
+    padding:10px 14px;
+    border-left:3px solid var(--ink);
+    background:var(--soft);
+    margin:0 0 14px;
+  }
+  .fdv-warning{border-left-color:var(--danger);}
+  table.fdv-table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:12.5px;
+    margin:0 0 16px;
+  }
+  table.fdv-table th, table.fdv-table td{
+    border:1px solid #999;
+    padding:6px 8px;
+    text-align:left;
+  }
+  table.fdv-table th{
+    background:#eee;
+    font-weight:700;
+  }
+  .fdv-figure{
+    border:1px solid #ccc;
+    border-radius:6px;
+    padding:14px;
+    margin:0 0 16px;
+    background:#fafafa;
+  }
+  .fdv-figure-frame{
+    min-height:120px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:#fff;
+    border:1px dashed #bbb;
+    border-radius:4px;
+    margin-bottom:8px;
+    overflow:hidden;
+  }
+  .fdv-figure-frame img{max-width:100%;max-height:280px;display:block;}
+  .fig-upload-label{
+    font-size:12px;
+    color:var(--muted);
+    cursor:pointer;
+    text-decoration:underline;
+  }
+  .fdv-figure-caption{
+    font-size:12px;
+    color:#444;
+    font-style:italic;
+  }
+  .fdv-backcover{
+    text-align:center;
+    padding:60px 0;
+  }
+  .fdv-backcover .site{
+    margin-top:10px;
+    font-size:12px;
+    letter-spacing:.06em;
+  }
+
+  /* Placeholder */
+  .placeholder{
+    text-align:center;
+    color:var(--muted);
+    padding:60px 10px;
+    font-size:14px;
+  }
+
+  /* ---------- Print / paged overlay ---------- */
+  #printOverlay{
+    display:none;
+    position:fixed;
+    inset:0;
+    background:#888;
+    z-index:9999;
+    overflow:auto;
+  }
+  #printOverlay.active{display:block;}
+  #printBar{
+    position:sticky;
+    top:0;
+    z-index:2;
+    background:#1c1c1c;
+    color:#fff;
+    padding:10px 18px;
+    display:flex;
+    gap:10px;
+    align-items:center;
+  }
+  #printBar .t{font-size:12.5px;color:#ccc;margin-right:auto;}
+  #pagedTarget{
+    max-width:900px;
+    margin:20px auto 60px;
+  }
+
+  @media print{
+    #app{display:none !important;}
+    #printOverlay{position:static;background:#fff;}
+    #printBar{display:none;}
+    #pagedTarget{margin:0;max-width:none;}
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="app-header">
+    <h1>FDV — Traductor y maquetador de manuales</h1>
+    <span class="tag">Chino/Inglés → Español (Chile) · uso interno</span>
+  </div>
+
+  <div class="card guide">
+    <h2>Cómo funciona</h2>
+    <ol>
+      <li>Elige el proveedor de IA y pega tu API key (queda solo en este navegador, nunca se envía a otro lado que no sea la API elegida).</li>
+      <li>Sube el manual original (.docx, .pdf con texto seleccionable, .txt) o pega el texto directamente.</li>
+      <li>Presiona <b>«Traducir y maquetar»</b>. El modelo traduce al español de Chile con el mismo tono y estructura de tus manuales FDV de referencia.</li>
+      <li>Revisa el borrador editable, sube las imágenes/diagramas donde corresponda, y presiona <b>«Generar vista de impresión»</b> para exportar a PDF.</li>
+    </ol>
+    <p class="help">Limitaciones: los PDF escaneados (imágenes de texto chino) no se pueden extraer automáticamente — necesitan OCR aparte. Los .doc antiguos no son compatibles, conviértelos a .docx o PDF antes de subir.</p>
+  </div>
+
+  <div class="card">
+    <h2>1 · Conexión con IA</h2>
+    <div class="grid3">
+      <div class="field">
+        <label>Proveedor</label>
+        <select id="provider">
+          <option value="gemini" selected>Google Gemini (gratis)</option>
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="openai">OpenAI (ChatGPT)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label id="apiKeyLabel">API key de Google AI Studio</label>
+        <input type="password" id="apiKey" placeholder="AIza...">
+      </div>
+      <div class="field">
+        <label>Modelo</label>
+        <input type="text" id="model" value="gemini-flash-latest">
+      </div>
+    </div>
+    <div class="field" style="margin-top:-4px;">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:400;">
+        <input type="checkbox" id="rememberKey" style="width:auto;"> Recordar API key en este navegador
+      </label>
+      <p class="help" id="providerHelp">Google Gemini tiene un nivel gratuito: crea tu key en <b>aistudio.google.com/app/apikey</b> con tu cuenta de Google, sin tarjeta de crédito.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2 · Datos del producto</h2>
+    <div class="grid3">
+      <div class="field">
+        <label>Categoría (portada, en cursiva)</label>
+        <input type="text" id="category" placeholder="Ej: Horno / Encimera / Campana">
+      </div>
+      <div class="field">
+        <label>Nombre del producto</label>
+        <input type="text" id="productName" placeholder="Ej: Design Black 60">
+      </div>
+      <div class="field">
+        <label>SKU</label>
+        <input type="text" id="sku" placeholder="Ej: 01DB2N00">
+      </div>
+    </div>
+    <div class="field">
+      <label>Logo FDV (opcional — si no subes uno se usa un logo de texto)</label>
+      <label class="logo-upload">📎 Subir logo (PNG/SVG)
+        <input type="file" id="logoInput" accept="image/*" style="display:none;">
+      </label>
+      <span id="logoStatus" class="help"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3 · Manual original</h2>
+    <div class="dropzone" id="dropzone">
+      Arrastra aquí el archivo (.docx / .pdf / .txt) o haz clic para elegirlo
+      <input type="file" id="fileInput" accept=".docx,.pdf,.txt,.md" style="display:none;">
+    </div>
+    <div class="field" style="margin-top:14px;">
+      <label>Texto extraído (revísalo y corrígelo antes de traducir)</label>
+      <textarea id="extracted" rows="10" placeholder="El texto extraído del archivo aparecerá aquí. También puedes pegar texto directamente."></textarea>
+    </div>
+    <div class="row">
+      <button id="btnTranslate" class="secondary" disabled>Traducir y maquetar con Claude</button>
+      <span class="status" id="statusMsg"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>Ajustar estilo de traducción (avanzado)</summary>
+      <div class="field">
+        <label>Instrucciones de estilo enviadas a Claude (puedes editarlas con el tiempo)</label>
+        <textarea id="styleGuide" rows="16"></textarea>
+        <div class="help">Esto se guarda en este navegador. Si lo dejas en blanco, se usa la guía de estilo por defecto.</div>
+      </div>
+    </details>
+  </div>
+
+  <div class="card" id="draftWrap">
+    <div id="draftToolbar">
+      <span class="t">Borrador editable — haz clic en cualquier texto para corregirlo</span>
+      <button class="secondary" id="btnPaginate">Generar vista de impresión / PDF</button>
+    </div>
+    <div id="draft"><div class="placeholder">Aquí aparecerá tu manual traducido.</div></div>
+  </div>
+</div>
+
+<div id="printOverlay">
+  <div id="printBar">
+    <span class="t">Vista de impresión</span>
+    <button id="btnPrint">Imprimir / Guardar como PDF</button>
+    <button class="secondary" id="btnClosePrint">Cerrar</button>
+  </div>
+  <div id="pagedTarget"></div>
+</div>
+
+<script>
+/* ==========================================================================
+   FDV — Traductor y maquetador de manuales
+   Todo corre en el navegador. La API key nunca se envía a ningún servidor
+   propio: solo se usa para llamar directamente a la API del proveedor elegido
+   (Google Gemini, Anthropic u OpenAI).
+   ========================================================================== */
+
+const PROVIDER_INFO = {
+  gemini: {
+    label: 'API key de Google AI Studio',
+    placeholder: 'AIza...',
+    defaultModel: 'gemini-flash-latest',
+    help: 'Google Gemini tiene un nivel gratuito: crea tu key en <b>aistudio.google.com/app/apikey</b> con tu cuenta de Google, sin tarjeta de crédito.'
+  },
+  anthropic: {
+    label: 'API key de Anthropic',
+    placeholder: 'sk-ant-...',
+    defaultModel: 'claude-sonnet-5',
+    help: 'Crea tu key en <b>console.anthropic.com</b>. Es de pago por uso (requiere cargar créditos).'
+  },
+  openai: {
+    label: 'API key de OpenAI',
+    placeholder: 'sk-...',
+    defaultModel: 'gpt-4o-mini',
+    help: 'Crea tu key en <b>platform.openai.com/api-keys</b>. Es de pago por uso.'
+  }
+};
+
+const els = {
+  provider: document.getElementById('provider'),
+  apiKeyLabel: document.getElementById('apiKeyLabel'),
+  providerHelp: document.getElementById('providerHelp'),
+  apiKey: document.getElementById('apiKey'),
+  model: document.getElementById('model'),
+  rememberKey: document.getElementById('rememberKey'),
+  category: document.getElementById('category'),
+  productName: document.getElementById('productName'),
+  sku: document.getElementById('sku'),
+  logoInput: document.getElementById('logoInput'),
+  logoStatus: document.getElementById('logoStatus'),
+  dropzone: document.getElementById('dropzone'),
+  fileInput: document.getElementById('fileInput'),
+  extracted: document.getElementById('extracted'),
+  btnTranslate: document.getElementById('btnTranslate'),
+  statusMsg: document.getElementById('statusMsg'),
+  styleGuide: document.getElementById('styleGuide'),
+  draftWrap: document.getElementById('draftWrap'),
+  draft: document.getElementById('draft'),
+  btnPaginate: document.getElementById('btnPaginate'),
+  printOverlay: document.getElementById('printOverlay'),
+  pagedTarget: document.getElementById('pagedTarget'),
+  btnPrint: document.getElementById('btnPrint'),
+  btnClosePrint: document.getElementById('btnClosePrint'),
+};
+
+let logoDataUrl = null;
+let manualData = null;
+
+/* ---------------- Provider switching ---------------- */
+function applyProviderUI(providerKey, opts){
+  opts = opts || {};
+  const info = PROVIDER_INFO[providerKey] || PROVIDER_INFO.gemini;
+  els.apiKeyLabel.textContent = info.label;
+  els.apiKey.placeholder = info.placeholder;
+  els.providerHelp.innerHTML = info.help;
+  // Only overwrite the model field if it's empty or still holds another provider's default
+  const isKnownDefault = Object.values(PROVIDER_INFO).some(p => p.defaultModel === els.model.value.trim());
+  if (!opts.keepModel && (els.model.value.trim() === '' || isKnownDefault)) {
+    els.model.value = info.defaultModel;
+  }
+}
+
+els.provider.addEventListener('change', () => {
+  localStorage.setItem('fdv_provider', els.provider.value);
+  applyProviderUI(els.provider.value);
+  // Switching provider invalidates the previous key/model pairing
+  const savedKeyForProvider = localStorage.getItem('fdv_apiKey_' + els.provider.value);
+  els.apiKey.value = savedKeyForProvider || '';
+  els.rememberKey.checked = !!savedKeyForProvider;
+});
+
+/* ---------------- Persistence ---------------- */
+(function initFromStorage(){
+  const savedProvider = localStorage.getItem('fdv_provider') || 'gemini';
+  els.provider.value = savedProvider;
+  const savedModel = localStorage.getItem('fdv_model_' + savedProvider);
+  applyProviderUI(savedProvider, { keepModel: !!savedModel });
+  if (savedModel) els.model.value = savedModel;
+  const savedKey = localStorage.getItem('fdv_apiKey_' + savedProvider);
+  if (savedKey) { els.apiKey.value = savedKey; els.rememberKey.checked = true; }
+  const savedStyle = localStorage.getItem('fdv_styleGuide');
+  els.styleGuide.value = savedStyle || DEFAULT_STYLE_GUIDE();
+  const savedLogo = localStorage.getItem('fdv_logo');
+  if (savedLogo) { logoDataUrl = savedLogo; els.logoStatus.textContent = 'Logo cargado.'; }
+})();
+
+els.rememberKey.addEventListener('change', persistKey);
+els.apiKey.addEventListener('input', persistKey);
+function persistKey(){
+  const k = 'fdv_apiKey_' + els.provider.value;
+  if (els.rememberKey.checked) localStorage.setItem(k, els.apiKey.value);
+  else localStorage.removeItem(k);
+}
+els.model.addEventListener('input', () => localStorage.setItem('fdv_model_' + els.provider.value, els.model.value));
+els.styleGuide.addEventListener('input', () => localStorage.setItem('fdv_styleGuide', els.styleGuide.value));
+
+els.logoInput.addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  logoDataUrl = await fileToDataURL(f);
+  localStorage.setItem('fdv_logo', logoDataUrl);
+  els.logoStatus.textContent = 'Logo cargado: ' + f.name;
+});
+
+function fileToDataURL(file){
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
+/* ---------------- File extraction ---------------- */
+els.dropzone.addEventListener('click', () => els.fileInput.click());
+els.dropzone.addEventListener('dragover', (e) => { e.preventDefault(); els.dropzone.classList.add('drag'); });
+els.dropzone.addEventListener('dragleave', () => els.dropzone.classList.remove('drag'));
+els.dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  els.dropzone.classList.remove('drag');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+els.fileInput.addEventListener('change', (e) => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+async function handleFile(file){
+  setStatus('Extrayendo texto de "' + file.name + '"…', true);
+  try{
+    const name = file.name.toLowerCase();
+    let text = '';
+    if (name.endsWith('.docx')){
+      const buf = await file.arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer: buf });
+      text = result.value;
+    } else if (name.endsWith('.pdf')){
+      text = await extractPdfText(file);
+    } else {
+      text = await file.text();
+    }
+    els.extracted.value = text.trim();
+    els.btnTranslate.disabled = !(els.extracted.value.trim().length > 0);
+    setStatus('Texto extraído (' + text.length + ' caracteres). Revísalo antes de traducir.', false);
+  } catch(err){
+    console.error(err);
+    setStatus('Error al leer el archivo: ' + err.message, false);
+  }
+}
+
+async function extractPdfText(file){
+  const buf = await file.arrayBuffer();
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+  let out = [];
+  for (let i = 1; i <= doc.numPages; i++){
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    const strings = content.items.map(it => it.str);
+    out.push(strings.join(' '));
+  }
+  return out.join('\n\n');
+}
+
+els.extracted.addEventListener('input', () => {
+  els.btnTranslate.disabled = !(els.extracted.value.trim().length > 0);
+});
+
+/* ---------------- Style guide ---------------- */
+function DEFAULT_STYLE_GUIDE(){
+return "Eres el equipo de redaccion tecnica de FDV, una marca de electrodomesticos de cocina de alta gama que se vende en Chile a un publico de nivel socioeconomico alto. Tu trabajo es tomar el texto de un manual original (a veces en ingles con errores de traduccion automatica desde el chino, a veces directamente en chino) y convertirlo en un manual en espanol de Chile, con la calidad de un redactor tecnico profesional, no de un traductor automatico.\n\n" +
+"REGLAS DE TRADUCCION\n" +
+"- Usa siempre 'usted', tono formal, calido pero profesional. Nunca 'tu'.\n" +
+"- No traduzcas literalmente: reordena las frases para que se lean como si un redactor tecnico chileno las hubiera escrito originalmente, siguiendo una logica clara (condicion, luego accion; causa, luego consecuencia).\n" +
+"- El texto original suele venir mal traducido del chino al ingles (frases incompletas, repeticiones, contaminacion de nombres de otros productos, referencias legales de otros paises). Corrige esos errores usando el sentido comun tecnico: completa frases truncas, elimina contaminacion irrelevante (por ejemplo, si en un manual de horno aparece de repente 'REFRIGERADOR COMBINADO SMART IT 2.0', ignora esa mencion, es basura de plantilla).\n" +
+"- Elimina o generaliza referencias normativas de otros paises (UK Building Regulations, IEE Wiring Regulations, AS/NZS, normativa europea especifica, etc.). Reemplazalas por frases neutras como 'de acuerdo con la normativa electrica y de seguridad vigente en el pais de instalacion' o 'segun la normativa local vigente'.\n" +
+"- Nunca omitas contenido de seguridad. Todas las advertencias, precauciones y notas de seguridad del original deben quedar presentes, solo que redactadas de forma natural.\n" +
+"- Usa formato chileno de numeros: coma decimal (0,075 kW), espacio antes de las unidades y del simbolo de grados (160 °C, 50 mm).\n" +
+"- Elimina menciones a tarjetas de garantia, legislacion de otros paises, o avisos que no apliquen fuera del pais de origen del fabricante.\n" +
+"- Los titulos de seccion van en MAYUSCULAS (ADVERTENCIAS, INSTALACION, INSTRUCCIONES DE USO, LIMPIEZA Y MANTENIMIENTO, SOLUCION DE PROBLEMAS, etc.).\n\n" +
+"ESTRUCTURA\n" +
+"Organiza el manual en este orden logico, usando solo las secciones que correspondan segun el contenido real disponible (no inventes contenido que no este en el original):\n" +
+"1. Portada (categoria + nombre de producto + SKU)\n" +
+"2. Indice\n" +
+"3. Advertencias (declaracion de impacto ambiental + precauciones de seguridad)\n" +
+"4. Informacion del producto (lista de accesorios, parametros tecnicos, dimensiones, partes/piezas)\n" +
+"5. Instalacion (precauciones, metodo de instalacion, conexion electrica, conexion de gas si aplica)\n" +
+"6. Instrucciones de uso (panel de control, funciones, temporizador, guia de cocina o consejos de uso si aplica)\n" +
+"7. Limpieza y mantenimiento\n" +
+"8. Solucion de problemas / preguntas frecuentes\n" +
+"9. Contraportada (logo y sitio web)\n\n" +
+"EJEMPLOS DE TONO (asi debe sonar la traduccion final, ni literal ni acartonada):\n" +
+"- Original: 'This appliance can be connected only to a supply with system impedance no more than In case necessary, please consult your supply authority for system impedance information.' -> 'El aparato solo debe conectarse a una red electrica cuya impedancia del sistema cumpla con los requisitos tecnicos indicados para el producto. En caso de duda, consulte a la empresa suministradora de electricidad.'\n" +
+"- Original: 'Do not use harsh abrasive cleaners or sharp metal scrapers to clean the oven door glass, since they can scratch the surface, which may result in shattering of the glass.' -> 'No utilice limpiadores abrasivos agresivos ni raspadores metalicos afilados para limpiar el vidrio de la puerta del horno, ya que pueden rayar la superficie y provocar la rotura del vidrio.'\n" +
+"- Original: 'NOTE: This appliance must be correctly installed by a suitably qualified person, strictly in accordance with the following UK Regulations...' -> 'Este aparato debe ser instalado unicamente por una persona debidamente calificada, de acuerdo con la normativa electrica y de seguridad vigente en el pais de instalacion.'\n\n" +
+"FORMATO DE SALIDA\n" +
+"Responde UNICAMENTE con un objeto JSON valido (sin texto antes ni despues, sin bloques de codigo markdown), con este esquema exacto:\n" +
+"{\n" +
+'  "category": "string, ej HORNO",\n' +
+'  "product": "string, nombre del producto",\n' +
+'  "sku": "string",\n' +
+'  "index": [{"title": "string"}],\n' +
+'  "sections": [\n' +
+"    {\n" +
+'      "header": "string, titulo de seccion en mayusculas para el encabezado de pagina",\n' +
+'      "blocks": [\n' +
+'        {"type":"h2","text":"..."},\n' +
+'        {"type":"h3","text":"..."},\n' +
+'        {"type":"p","text":"..."},\n' +
+'        {"type":"ul","items":["...","..."]},\n' +
+'        {"type":"note","text":"..."},\n' +
+'        {"type":"warning","text":"..."},\n' +
+'        {"type":"table","headers":["..."],"rows":[["...","..."]]},\n' +
+'        {"type":"figure","caption":"string describiendo brevemente que diagrama va aqui, ej. Fig. 2 - Conexion del codo"}\n' +
+"      ]\n" +
+"    }\n" +
+"  ]\n" +
+"}\n" +
+"No agregues comentarios ni texto fuera del JSON. Usa bloques 'figure' donde el original mencione una imagen, diagrama o figura, para dejar el espacio marcado (el usuario subira la imagen real despues).";
+}
+
+/* ---------------- Translate (multi-provider) ---------------- */
+els.btnTranslate.addEventListener('click', translateWithClaude);
+
+function sleep(ms){ return new Promise(resolve => setTimeout(resolve, ms)); }
+
+/** Ejecuta fn() y, si falla con un error transitorio (429 / 500 / 503),
+ *  espera con backoff creciente y reintenta, mostrando el progreso en pantalla. */
+async function withRetry(fn, opts){
+  opts = opts || {};
+  const maxRetries = opts.maxRetries != null ? opts.maxRetries : 4;
+  const delays = opts.delaysMs || [10000, 20000, 40000, 60000];
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++){
+    try{
+      return await fn();
+    } catch(err){
+      lastErr = err;
+      const retryable = err.status === 429 || err.status === 500 || err.status === 503;
+      if (!retryable || attempt === maxRetries){
+        throw err;
+      }
+      const waitMs = delays[Math.min(attempt, delays.length - 1)];
+      const waitS = Math.round(waitMs / 1000);
+      setStatus('Se alcanzó el límite de la cuota gratuita (error ' + err.status + '). Reintentando en ' + waitS + 's… (intento ' + (attempt + 2) + '/' + (maxRetries + 1) + ')', true);
+      await sleep(waitMs);
+    }
+  }
+  throw lastErr;
+}
+
+async function callGemini(apiKey, model, system, userMsg){
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(apiKey);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: system }] },
+      contents: [{ role: 'user', parts: [{ text: userMsg }] }],
+      generationConfig: { maxOutputTokens: 32768, temperature: 0.4 }
+    })
+  });
+  if (!res.ok){
+    const errText = await res.text();
+    const e = new Error('Gemini respondio ' + res.status + ': ' + errText.slice(0, 400));
+    e.status = res.status;
+    throw e;
+  }
+  const data = await res.json();
+  const cand = (data.candidates || [])[0];
+  if (!cand) throw new Error('Gemini no devolvio contenido (puede haber bloqueado la respuesta por seguridad). Respuesta: ' + JSON.stringify(data).slice(0,300));
+  return (cand.content.parts || []).map(p => p.text || '').join('\n');
+}
+
+async function callAnthropic(apiKey, model, system, userMsg){
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: model,
+      max_tokens: 8000,
+      system: system,
+      messages: [{ role: 'user', content: userMsg }]
+    })
+  });
+  if (!res.ok){
+    const errText = await res.text();
+    const e = new Error('Anthropic respondio ' + res.status + ': ' + errText.slice(0, 400));
+    e.status = res.status;
+    throw e;
+  }
+  const data = await res.json();
+  return (data.content || []).map(b => b.text || '').join('\n');
+}
+
+async function callOpenAI(apiKey, model, system, userMsg){
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'Authorization': 'Bearer ' + apiKey
+    },
+    body: JSON.stringify({
+      model: model,
+      max_tokens: 8000,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: userMsg }
+      ]
+    })
+  });
+  if (!res.ok){
+    const errText = await res.text();
+    const e = new Error('OpenAI respondio ' + res.status + ': ' + errText.slice(0, 400) + ' (si ves un error de CORS/red, OpenAI puede estar bloqueando llamadas directas desde el navegador; prueba con Gemini o Anthropic).');
+    e.status = res.status;
+    throw e;
+  }
+  const data = await res.json();
+  const choice = (data.choices || [])[0];
+  if (!choice) throw new Error('OpenAI no devolvio contenido.');
+  return choice.message.content;
+}
+
+async function translateWithClaude(){
+  const provider = els.provider.value;
+  const apiKey = els.apiKey.value.trim();
+  if (!apiKey){ alert('Ingresa tu API key de ' + PROVIDER_INFO[provider].label.replace('API key de ', '') + '.'); return; }
+  const sourceText = els.extracted.value.trim();
+  if (!sourceText){ alert('Primero extrae o pega el texto del manual original.'); return; }
+
+  const meta = {
+    category: els.category.value.trim() || 'MANUAL',
+    product: els.productName.value.trim() || 'PRODUCTO',
+    sku: els.sku.value.trim() || ''
+  };
+
+  const system = (els.styleGuide.value.trim() || DEFAULT_STYLE_GUIDE());
+  const userMsg = "Datos del producto:\n" +
+    "Categoria: " + meta.category + "\n" +
+    "Nombre: " + meta.product + "\n" +
+    "SKU: " + meta.sku + "\n\n" +
+    "Texto original del manual (puede tener errores de traduccion automatica previa, esta OK, tu corrigelos):\n\n\"\"\"\n" + sourceText + "\n\"\"\"\n\n" +
+    "Devuelve solo el JSON segun el esquema indicado en tus instrucciones.";
+
+  setStatus('Traduciendo y maquetando… esto puede tardar un minuto.', true);
+  els.btnTranslate.disabled = true;
+
+  try{
+    let model = els.model.value.trim() || PROVIDER_INFO[provider].defaultModel;
+    const callWith = function(m){
+      if (provider === 'gemini') return callGemini(apiKey, m, system, userMsg);
+      if (provider === 'anthropic') return callAnthropic(apiKey, m, system, userMsg);
+      if (provider === 'openai') return callOpenAI(apiKey, m, system, userMsg);
+      return Promise.reject(new Error('Proveedor desconocido.'));
+    };
+    let raw;
+    try {
+      raw = await withRetry(function(){ return callWith(model); });
+    } catch(errModel) {
+      // If the model itself is invalid/deprecated (404) and it's not already the
+      // provider's current default, auto-fallback to the default model once.
+      const fallback = PROVIDER_INFO[provider].defaultModel;
+      if (errModel.status === 404 && model !== fallback) {
+        setStatus('El modelo "' + model + '" ya no esta disponible. Reintentando con "' + fallback + '"…', true);
+        model = fallback;
+        els.model.value = model;
+        localStorage.setItem('fdv_model_' + provider, model);
+        raw = await withRetry(function(){ return callWith(model); });
+      } else {
+        throw errModel;
+      }
+    }
+
+    const json = extractJSON(raw);
+    if (!json) throw new Error('No se pudo interpretar la respuesta como JSON. Revisa la consola del navegador.');
+
+    manualData = json;
+    if (!manualData.category) manualData.category = meta.category;
+    if (!manualData.product) manualData.product = meta.product;
+    if (!manualData.sku) manualData.sku = meta.sku;
+
+    renderDraft(manualData);
+    setStatus('Listo. Revisa el borrador, corrige texto y sube las imagenes que falten.', false);
+  } catch(err){
+    console.error(err);
+    setStatus('Error: ' + err.message, false);
+    let extra = '';
+    if (err.status === 429) extra = '\n\nYa se reintentó varias veces y sigue sin cuota disponible. Espera unos minutos, o prueba con un texto más corto (pega solo una parte del manual) para reducir el consumo de tokens por solicitud.';
+    alert('Ocurrio un error al traducir:\n\n' + err.message + extra);
+  } finally {
+    els.btnTranslate.disabled = false;
+  }
+}
+
+function extractJSON(raw){
+  let s = raw.trim();
+  s = s.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+  const first = s.indexOf('{');
+  const last = s.lastIndexOf('}');
+  if (first === -1 || last === -1) return null;
+  const candidate = s.slice(first, last + 1);
+  try{ return JSON.parse(candidate); } catch(e){
+    console.warn('JSON.parse fallo, respuesta cruda:', raw);
+    return null;
+  }
+}
+
+/* ---------------- Render editable draft ---------------- */
+let figCounter = 0;
+
+function renderDraft(data){
+  els.draftWrap.style.display = 'block';
+  const html = [];
+
+  // Cover
+  html.push('<div class="fdv-cover">');
+  html.push('  <div class="fdv-cover-sidebar"><span class="fdv-cover-sidebar-text">MANUAL<br>DE USO</span></div>');
+  html.push('  <div class="fdv-cover-main">');
+  html.push('    <span class="fdv-cat" contenteditable="true">' + esc(data.category || '') + '</span>');
+  html.push('    <span class="fdv-name" contenteditable="true">' + esc(data.product || '') + '</span>');
+  html.push('    <hr class="fdv-rule">');
+  html.push('    <div class="fdv-sku" contenteditable="true">SKU: ' + esc(data.sku || '') + '</div>');
+  html.push('    <div class="fdv-cover-illustration">');
+  html.push(renderFigure({ caption: 'Imagen o diagrama del producto' }));
+  html.push('      <div class="fdv-cover-logo">' + logoHtml() + '</div>');
+  html.push('    </div>');
+  html.push('  </div>');
+  html.push('</div>');
+
+  // Index
+  html.push('<div class="fdv-toc-block" data-secid="toc">');
+  html.push('  <h2 class="fdv-label" style="display:block;text-align:center;">INDICE</h2>');
+  (data.index || []).forEach(function(item, i){
+    html.push('  <div class="fdv-toc-row"><span contenteditable="true">' + romanNum(i+1) + '. ' + esc(item.title || '') + '</span></div>');
+  });
+  html.push('</div>');
+
+  // Sections
+  (data.sections || []).forEach(function(sec, si){
+    const secId = 'sec-' + si;
+    html.push('<div class="fdv-section" data-secid="' + secId + '">');
+    html.push('  <h2 class="fdv-label" data-running="1">' + esc(sec.header || '') + '</h2>');
+    (sec.blocks || []).forEach(function(b){ html.push(renderBlock(b)); });
+    html.push('</div>');
+  });
+
+  // Back cover
+  html.push('<div class="fdv-backcover">');
+  html.push('  ' + logoHtml());
+  html.push('  <div class="site" contenteditable="true">WWW.FDV.COM</div>');
+  html.push('</div>');
+
+  els.draft.innerHTML = html.join('\n');
+  wireFigureUploads();
+}
+
+function logoHtml(){
+  if (logoDataUrl){
+    return '<div class="fdv-logoslot"><img src="' + logoDataUrl + '" alt="FDV"></div>';
+  }
+  return '<div class="fdv-logoslot"><span style="font-weight:800;font-style:italic;font-size:22px;">FDV</span></div>';
+}
+
+function renderBlock(b){
+  switch(b.type){
+    case 'h2':
+      return '<h3 contenteditable="true">' + esc(b.text || '') + '</h3>';
+    case 'h3':
+      return '<h4 contenteditable="true">' + esc(b.text || '') + '</h4>';
+    case 'p':
+      return '<p contenteditable="true">' + esc(b.text || '') + '</p>';
+    case 'ul':
+      return '<ul>' + (b.items || []).map(function(it){ return '<li contenteditable="true">' + esc(it) + '</li>'; }).join('') + '</ul>';
+    case 'note':
+      return '<div class="fdv-note" contenteditable="true"><b>Nota:</b> ' + esc(b.text || '') + '</div>';
+    case 'warning':
+      return '<div class="fdv-warning" contenteditable="true"><b>Advertencia:</b> ' + esc(b.text || '') + '</div>';
+    case 'table':
+      return renderTable(b);
+    case 'figure':
+      return renderFigure(b);
+    default:
+      return '<p contenteditable="true">' + esc(b.text || JSON.stringify(b)) + '</p>';
+  }
+}
+
+function renderTable(b){
+  const headers = b.headers || [];
+  const rows = b.rows || [];
+  let out = '<table class="fdv-table"><thead><tr>';
+  headers.forEach(function(h){ out += '<th contenteditable="true">' + esc(h) + '</th>'; });
+  out += '</tr></thead><tbody>';
+  rows.forEach(function(r){
+    out += '<tr>';
+    r.forEach(function(c){ out += '<td contenteditable="true">' + esc(c) + '</td>'; });
+    out += '</tr>';
+  });
+  out += '</tbody></table>';
+  return out;
+}
+
+function renderFigure(b){
+  figCounter++;
+  const fid = 'fig-' + figCounter;
+  return '<div class="fdv-figure" data-figid="' + fid + '">' +
+    '<div class="fdv-figure-frame">' +
+      '<img style="display:none;">' +
+      '<label class="fig-upload-label">📎 Adjuntar imagen / diagrama<input type="file" accept="image/*" data-figinput="' + fid + '" style="display:none;"></label>' +
+    '</div>' +
+    '<div class="fdv-figure-caption" contenteditable="true">' + esc(b.caption || 'Figura') + '</div>' +
+  '</div>';
+}
+
+function wireFigureUploads(){
+  els.draft.querySelectorAll('input[data-figinput]').forEach(function(input){
+    input.addEventListener('change', async function(e){
+      const f = e.target.files[0];
+      if (!f) return;
+      const dataUrl = await fileToDataURL(f);
+      const frame = input.closest('.fdv-figure-frame');
+      const img = frame.querySelector('img');
+      img.src = dataUrl;
+      img.style.display = 'block';
+      const label = frame.querySelector('.fig-upload-label');
+      label.firstChild.textContent = '📎 Cambiar imagen ';
+    });
+  });
+}
+
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function romanNum(n){
+  const vals=[10,9,5,4,1], syms=['X','IX','V','IV','I'];
+  let out=''; let num=n;
+  for(let i=0;i<vals.length;i++){ while(num>=vals[i]){ out+=syms[i]; num-=vals[i]; } }
+  return out;
+}
+
+/* ---------------- Paginate + print ---------------- */
+els.btnPaginate.addEventListener('click', generatePaginated);
+els.btnClosePrint.addEventListener('click', () => els.printOverlay.classList.remove('active'));
+els.btnPrint.addEventListener('click', () => window.print());
+
+const PAGE_CSS = "\n" +
+"@page{ size: letter; margin: 20mm 16mm 18mm; \n" +
+"  @bottom-left{ content: counter(page) '  |  MANUAL DE USO  |  ' string(fdvProduct); font-size:8.5pt; font-family:'Poppins',sans-serif; letter-spacing:.04em; color:#111; }\n" +
+"}\n" +
+"@page cover{ margin:0; @bottom-left{content:none;} }\n" +
+"@page back{ margin:0; @bottom-left{content:none;} }\n" +
+"html,body{ font-family:'Poppins',Arial,sans-serif; color:#111; font-size:13px; line-height:1.55; }\n" +
+".fdv-cover{ page:cover; break-after: page; min-height: 100vh; height:100vh; padding: 10mm; position:relative; box-sizing:border-box; border:2px solid #111; }\n" +
+".fdv-cover-sidebar{ position:absolute; left:10mm; top:10mm; bottom:10mm; width:12mm; background:#111; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; padding-bottom:14mm; }\n" +
+".fdv-cover-sidebar-text{ color:#fff; font-size:8.5pt; font-weight:700; letter-spacing:.08em; writing-mode:vertical-rl; transform:rotate(180deg); text-align:center; line-height:1.4; }\n" +
+".fdv-cover-main{ margin-left:12mm; padding:14mm 12mm 8mm; display:flex; flex-direction:column; height:100%; box-sizing:border-box; }\n" +
+".fdv-backcover{ page: back; break-before: page; text-align:center; padding-top:40vh; }\n" +
+".fdv-cat{ font-style:italic; font-weight:700; font-size:22pt; display:block; string-set: fdvProduct content(); }\n" +
+".fdv-name{ font-weight:400; font-size:18pt; display:block; margin-top:4px; }\n" +
+".fdv-rule{ border:none;border-top:2px solid #111;width:100%;max-width:130mm;margin:12px 0 10px; }\n" +
+".fdv-sku{ font-size:10pt; letter-spacing:.04em; }\n" +
+".fdv-cover-illustration{ margin-top:14mm; flex:1; display:flex; flex-direction:column; }\n" +
+".fdv-cover-illustration .fdv-figure-frame{ flex:1; min-height:70mm; border:1px solid #111; }\n" +
+".fdv-cover-logo{ align-self:flex-end; margin-top:8mm; }\n" +
+".fig-upload-label{ display:none; }\n" +
+".fdv-toc-block{ break-after: page; padding-top: 20mm; }\n" +
+".fdv-label{ display:block; text-align:center; font-weight:700; letter-spacing:.08em; text-transform:uppercase; font-size:13px; border-bottom:2px solid #111; padding-bottom:6px; margin:0 auto 20px; width:max-content; string-set: fdvSection content(); }\n" +
+"@page{ @top-center{ content: string(fdvSection); font-size:9.5pt; font-weight:700; letter-spacing:.08em; text-transform:uppercase; padding-bottom:6pt; } }\n" +
+".fdv-section{ break-before: page; padding-top:4mm; }\n" +
+".fdv-toc-row{ display:flex; justify-content:space-between; font-weight:600; font-size:13px; padding:8px 0; border-bottom:1px dotted #ccc; }\n" +
+".fdv-toc-row .pgnum::before{ content: target-counter(attr(data-target url), page); }\n" +
+"h3{ font-size:13.5px; font-weight:700; margin:16px 0 8px; break-after: avoid; }\n" +
+"h4{ font-size:12.5px; font-weight:700; margin:12px 0 6px; break-after: avoid; }\n" +
+"p{ margin:0 0 10px; orphans:3; widows:3; }\n" +
+"ul{ margin:0 0 10px; padding-left:18px; }\n" +
+".fdv-note,.fdv-warning{ font-size:12px; padding:9px 12px; border-left:3px solid #111; background:#f3f3f3; margin:0 0 12px; break-inside: avoid; }\n" +
+".fdv-warning{ border-left-color:#b3261e; }\n" +
+"table.fdv-table{ width:100%; border-collapse:collapse; font-size:11px; margin:0 0 14px; break-inside: avoid; }\n" +
+"table.fdv-table th, table.fdv-table td{ border:1px solid #999; padding:5px 7px; text-align:left; }\n" +
+"table.fdv-table th{ background:#eee; font-weight:700; }\n" +
+".fdv-figure{ border:1px solid #ccc; border-radius:4px; padding:10px; margin:0 0 14px; break-inside: avoid; }\n" +
+".fdv-figure-frame{ min-height:90px; display:flex; align-items:center; justify-content:center; }\n" +
+".fdv-figure-frame img{ max-width:100%; max-height:220px; }\n" +
+".fdv-figure-caption{ font-size:11px; font-style:italic; margin-top:6px; }\n" +
+".fig-upload-label{ display:none; }\n" +
+".fdv-logoslot img{ max-height:40px; }\n";
+
+const PAGEDJS_CDN_URLS = [
+  'https://cdn.jsdelivr.net/npm/pagedjs/dist/paged.esm.js',
+  'https://unpkg.com/pagedjs/dist/paged.esm.js',
+  'https://cdn.jsdelivr.net/npm/pagedjs@0.4.3/dist/paged.esm.js',
+  'https://cdn.jsdelivr.net/npm/pagedjs@0.5.0/dist/paged.esm.js'
+];
+
+async function loadPreviewer(){
+  let lastErr;
+  for (const url of PAGEDJS_CDN_URLS){
+    try{
+      const mod = await import(url);
+      if (mod && mod.Previewer) return mod.Previewer;
+    } catch(err){
+      lastErr = err;
+      console.warn('No se pudo cargar paged.js desde', url, err);
+    }
+  }
+  throw lastErr || new Error('Ninguna fuente de paged.js respondio.');
+}
+
+async function generatePaginated(){
+  setStatus('Generando vista paginada…', true);
+  try{
+    const Previewer = await loadPreviewer();
+    const content = els.draft.innerHTML;
+    const cssBlob = new Blob([PAGE_CSS], { type: 'text/css' });
+    const cssUrl = URL.createObjectURL(cssBlob);
+
+    els.pagedTarget.innerHTML = '';
+    const previewer = new Previewer();
+    await previewer.preview(content, [cssUrl], els.pagedTarget);
+
+    els.printOverlay.classList.add('active');
+    setStatus('Vista paginada lista.', false);
+  } catch(err){
+    console.error(err);
+    setStatus('No se pudo generar la vista paginada: ' + err.message, false);
+    alert('No se pudo cargar el paginador (revisa tu conexion a internet, o algo lo esta bloqueando). Se abrira una vista simple para imprimir en su lugar; el contenido y el diseño de portada se mantienen, solo faltarán los encabezados/pie de página automáticos por sección.');
+    fallbackPrint();
+  }
+}
+
+function fallbackPrint(){
+  els.pagedTarget.innerHTML = '<style>' +
+    '@page{ size: letter; margin: 16mm; } ' +
+    'body{font-family:Poppins,Arial,sans-serif;} ' +
+    '.fdv-cover{ page-break-after:always; margin-bottom:0; } ' +
+    '.fdv-toc-block{ page-break-after:always; } ' +
+    '.fdv-section{ page-break-before:always; } ' +
+    '.fdv-note,.fdv-warning,.fdv-figure,table.fdv-table{ page-break-inside:avoid; } ' +
+    '</style>' + els.draft.innerHTML;
+  els.printOverlay.classList.add('active');
+}
+
+/* ---------------- Status ---------------- */
+function setStatus(msg, busy){
+  els.statusMsg.textContent = msg;
+  els.statusMsg.classList.toggle('busy', !!busy);
+}
+</script>
+</body>
+</html>
