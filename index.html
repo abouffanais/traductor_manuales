@@ -698,6 +698,15 @@ els.fileInput.addEventListener('change', (e) => {
   if (e.target.files[0]) handleFile(e.target.files[0]);
 });
 
+/** Corre una promesa con un limite de tiempo global: si tarda demasiado
+ *  (p.ej. algo raro en un PDF), la abandona en vez de dejar la app colgada. */
+function withTimeout(promise, ms, label){
+  return Promise.race([
+    promise,
+    new Promise(function(_, reject){ setTimeout(function(){ reject(new Error('Tiempo de espera agotado en ' + label)); }, ms); })
+  ]);
+}
+
 async function handleFile(file){
   setStatus('Extrayendo texto de "' + file.name + '"…', true);
   extractedImages = [];
@@ -712,7 +721,7 @@ async function handleFile(file){
     } else if (name.endsWith('.pdf')){
       const buf = await file.arrayBuffer();
       text = await extractPdfText(buf.slice(0));
-      try{ extractedImages = await extractPdfImages(buf); } catch(imgErr){ console.warn('No se pudieron extraer imagenes del pdf:', imgErr); }
+      try{ extractedImages = await withTimeout(extractPdfImages(buf), 30000, 'extraccion de imagenes del PDF'); } catch(imgErr){ console.warn('No se pudieron extraer imagenes del pdf:', imgErr); }
     } else {
       text = await file.text();
     }
@@ -764,11 +773,30 @@ async function extractPdfImages(buf){
   for (let i = 1; i <= doc.numPages; i++){
     const page = await doc.getPage(i);
     const ops = await page.getOperatorList();
+    // pdf.js solo decodifica las imagenes de una pagina cuando esta se renderiza;
+    // sin esto, page.objs.get() de mas abajo se queda esperando para siempre.
+    try{
+      const viewport = page.getViewport({ scale: 1 });
+      const renderCanvas = document.createElement('canvas');
+      renderCanvas.width = Math.max(1, Math.floor(viewport.width));
+      renderCanvas.height = Math.max(1, Math.floor(viewport.height));
+      const renderCtx = renderCanvas.getContext('2d');
+      await page.render({ canvasContext: renderCtx, viewport: viewport }).promise;
+    } catch(renderErr){
+      console.warn('No se pudo renderizar la pagina ' + i + ' para decodificar imagenes:', renderErr);
+    }
     for (let j = 0; j < ops.fnArray.length; j++){
       if (ops.fnArray[j] !== pdfjsLib.OPS.paintImageXObject) continue;
       const imgName = ops.argsArray[j][0];
       try{
-        const imgObj = await new Promise(function(resolve){ page.objs.get(imgName, resolve); });
+        // Nunca esperar indefinidamente: si la imagen no esta lista en 3s, se omite.
+        const imgObj = await new Promise(function(resolve){
+          let settled = false;
+          try{
+            page.objs.get(imgName, function(o){ settled = true; resolve(o); });
+          } catch(getErr){ resolve(null); return; }
+          setTimeout(function(){ if (!settled) resolve(null); }, 3000);
+        });
         if (!imgObj || !imgObj.data || !imgObj.width || !imgObj.height) continue;
         const canvas = document.createElement('canvas');
         canvas.width = imgObj.width;
