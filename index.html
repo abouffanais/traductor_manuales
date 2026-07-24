@@ -709,6 +709,11 @@ function withTimeout(promise, ms, label){
 
 async function handleFile(file){
   setStatus('Extrayendo texto de "' + file.name + '"…', true);
+  // Bloquear el boton y vaciar lo anterior de inmediato: evita que, si ya habia
+  // un archivo cargado antes, alguien alcance a traducir con el texto/imagenes
+  // viejos mientras este archivo nuevo todavia se esta procesando.
+  els.btnTranslate.disabled = true;
+  els.extracted.value = '';
   extractedImages = [];
   try{
     const name = file.name.toLowerCase();
